@@ -373,6 +373,43 @@ def _is_node_graph(spec: str | dict) -> bool:
     ]
 
 
+def _validate_import_path(section: str, field: str, value: object) -> None:
+    """Validate a '<file or module>:<attribute>' import path."""
+    if not isinstance(value, str):
+        raise ValueError(
+            f"Invalid {section}.{field} format: expected "
+            f"'file.py:name' or 'module:name', got {value!r}"
+        )
+    module, sep, attribute = value.rpartition(":")
+    if not sep or not module or not attribute:
+        raise ValueError(
+            f"Invalid {section}.{field} format: expected "
+            f"'file.py:name' or 'module:name', got {value!r}"
+        )
+
+
+def _validate_import_config(
+    config: Config,
+    section: Literal["auth", "encryption", "priority", "http", "checkpointer"],
+    field: str,
+    *,
+    required: bool,
+) -> None:
+    """Validate a config section that points at an importable object."""
+    conf = config.get(section)
+    if conf is None:
+        return
+    if not isinstance(conf, dict):
+        raise ValueError(
+            f"Invalid {section}: expected an object, got {type(conf).__name__}"
+        )
+    if field not in conf:
+        if required:
+            raise ValueError(f"Invalid {section}: missing required '{field}'")
+        return
+    _validate_import_path(section, field, conf[field])
+
+
 def _get_source_kind(config: Config) -> str | None:
     source = config.get("source")
     if not isinstance(source, dict):
@@ -591,42 +628,19 @@ def validate_config(
             "Use `source.root` and `source.package` instead."
         )
 
-    # Validate auth config
-    if auth_conf := config.get("auth"):
-        if "path" in auth_conf:
-            if ":" not in auth_conf["path"]:
-                raise ValueError(
-                    f"Invalid auth.path format: '{auth_conf['path']}'. "
-                    "Must be in format './path/to/file.py:attribute_name'"
-                )
-    # Validate encryption config
-    if encryption_conf := config.get("encryption"):
-        if "path" in encryption_conf:
-            if ":" not in encryption_conf["path"]:
-                raise ValueError(
-                    f"Invalid encryption.path format: '{encryption_conf['path']}'. "
-                    "Must be in format './path/to/file.py:attribute_name'"
-                )
-    # Validate priority config
-    if priority_conf := config.get("priority"):
-        if "path" in priority_conf:
-            if ":" not in priority_conf["path"]:
-                raise ValueError(
-                    f"Invalid priority.path format: '{priority_conf['path']}'. "
-                    "Must be in format './path/to/file.py:attribute_name'"
-                )
-            if _is_node_graph(priority_conf["path"]):
-                raise ValueError(
-                    "JavaScript priority callbacks are not supported: "
-                    f"'{priority_conf['path']}'. Use a Python file or module instead."
-                )
-    if http_conf := config.get("http"):
-        if "app" in http_conf:
-            if ":" not in http_conf["app"]:
-                raise ValueError(
-                    f"Invalid http.app format: '{http_conf['app']}'. "
-                    "Must be in format './path/to/file.py:attribute_name'"
-                )
+    # Validate config sections that point at importable objects
+    _validate_import_config(config, "auth", "path", required=True)
+    _validate_import_config(config, "encryption", "path", required=True)
+    _validate_import_config(config, "priority", "path", required=True)
+    _validate_import_config(config, "http", "app", required=False)
+    _validate_import_config(config, "checkpointer", "path", required=False)
+
+    priority_conf = config.get("priority")
+    if priority_conf is not None and _is_node_graph(priority_conf["path"]):
+        raise ValueError(
+            "JavaScript priority callbacks are not supported: "
+            f"'{priority_conf['path']}'. Use a Python file or module instead."
+        )
     if keep_pkg_tools := config.get("keep_pkg_tools"):
         if isinstance(keep_pkg_tools, list):
             for tool in keep_pkg_tools:

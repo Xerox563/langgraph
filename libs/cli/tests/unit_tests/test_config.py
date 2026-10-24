@@ -259,6 +259,105 @@ def test_validate_config():
 
 
 @pytest.mark.parametrize(
+    "section", ["auth", "encryption", "priority", "http", "checkpointer"]
+)
+@pytest.mark.parametrize("value", ["not-an-object", 1, []])
+def test_validate_config_rejects_non_object_import_section(section, value):
+    with pytest.raises(ValueError, match=rf"Invalid {section}: expected an object"):
+        validate_config(
+            {
+                "python_version": "3.12",
+                "dependencies": ["."],
+                "graphs": {"agent": "./agent.py:graph"},
+                section: value,
+            }
+        )
+
+
+@pytest.mark.parametrize("section", ["auth", "encryption", "priority"])
+def test_validate_config_rejects_missing_required_import_path(section):
+    with pytest.raises(
+        ValueError, match=rf"Invalid {section}: missing required 'path'"
+    ):
+        validate_config(
+            {
+                "python_version": "3.12",
+                "dependencies": ["."],
+                "graphs": {"agent": "./agent.py:graph"},
+                section: {},
+            }
+        )
+
+
+@pytest.mark.parametrize(
+    ("section", "field"),
+    [
+        ("auth", "path"),
+        ("encryption", "path"),
+        ("priority", "path"),
+        ("http", "app"),
+        ("checkpointer", "path"),
+    ],
+)
+@pytest.mark.parametrize(
+    "value",
+    [123, None, True, ":", "./file.py:", ":attr", "./file.py"],
+)
+def test_validate_config_rejects_invalid_import_path(section, field, value):
+    with pytest.raises(ValueError, match=rf"Invalid {section}\.{field} format"):
+        validate_config(
+            {
+                "python_version": "3.12",
+                "dependencies": ["."],
+                "graphs": {"agent": "./agent.py:graph"},
+                section: {field: value},
+            }
+        )
+
+
+@pytest.mark.parametrize(
+    ("section", "field", "value"),
+    [
+        ("auth", "path", "./auth.py:auth"),
+        ("auth", "path", "my_package.auth:auth"),
+        ("encryption", "path", "./encryption.py:encryption"),
+        ("priority", "path", "./priority.py:priority"),
+        ("http", "app", "./app.py:app"),
+        ("checkpointer", "path", "./checkpointer.py:create_checkpointer"),
+    ],
+)
+def test_validate_config_accepts_valid_import_path(section, field, value):
+    config = validate_config(
+        {
+            "python_version": "3.12",
+            "dependencies": ["."],
+            "graphs": {"agent": "./agent.py:graph"},
+            section: {field: value},
+        }
+    )
+    assert config[section] == {field: value}
+
+
+@pytest.mark.parametrize(
+    ("section", "conf"),
+    [
+        ("http", {"disable_threads": True}),
+        ("checkpointer", {"ttl": {"strategy": "delete"}}),
+    ],
+)
+def test_validate_config_allows_optional_import_fields(section, conf):
+    config = validate_config(
+        {
+            "python_version": "3.12",
+            "dependencies": ["."],
+            "graphs": {"agent": "./agent.py:graph"},
+            section: conf,
+        }
+    )
+    assert config[section] == conf
+
+
+@pytest.mark.parametrize(
     "dependency",
     [
         "git+https://user:secret-token@github.com/org/private.git@main",
